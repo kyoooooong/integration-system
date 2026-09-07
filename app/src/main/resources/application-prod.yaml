@@ -1,0 +1,42 @@
+# 운영.
+#
+# 기본값을 두지 않는다. 값이 없으면 기동이 실패한다.
+#
+# 개발용 기본값으로 조용히 뜨는 것이 가장 나쁘다 — 운영 인스턴스가 개발 DB 에 붙거나
+# 잘못된 키로 공급사를 호출하면서도 health 는 UP 을 보고한다. 그 상태는 배포 직후가
+# 아니라 한참 뒤에 데이터로 발견된다.
+# 기동 실패는 시끄럽고 즉시 알 수 있다.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+supplier:
+  base-url: ${SUPPLIER_BASE_URL}
+  api-key: ${SUPPLIER_API_KEY}
+
+catalog:
+  sync:
+    interval: ${CATALOG_SYNC_INTERVAL:1h}
+
+management:
+  # health 는 상세를 숨긴다(공통 설정의 show-details: never). DB 주소나 디스크 경로가
+  # 인증 없이 노출되면 안 된다.
+  #
+  # metrics 는 노출한 채로 둔다. 공급사 이름과 오류 건수가 드러나므로 실제 배포라면
+  # 별도 관리 포트나 방화벽 뒤에 둬야 하지만, 여기서는 그렇게 하지 않았다 —
+  # 관리 포트를 분리하면 compose 의 healthcheck 가 닿지 못해 기동 판정이 깨지고,
+  # 앞단에 네트워크 경계가 없는 이 구성에서는 실질적인 격리가 생기지 않는다.
+  # 운영 표면만 늘고 얻는 것이 없다.
+  #
+  # Revisit: 앞단에 네트워크 경계나 인증 계층이 생기는 시점.
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    root: INFO
+    com.integration.stay: INFO

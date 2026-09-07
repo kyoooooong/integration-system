@@ -1,0 +1,23 @@
+# 공용 개발 환경.
+#
+# local 과 다른 점은 접속 대상이 공유 자원이라는 것뿐이다. 따라서 값은 주입받되
+# 기본값을 둬서, 설정을 빠뜨려도 기동은 되고 어디에 붙었는지 로그로 확인할 수 있게 한다.
+# prod 는 반대다 (application-prod.yaml 참고).
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/stay}
+    username: ${DB_USERNAME:stay}
+    password: ${DB_PASSWORD:stay}
+
+supplier:
+  base-url: ${SUPPLIER_BASE_URL:http://localhost:9090}
+  api-key: ${SUPPLIER_API_KEY:dev-key}
+
+catalog:
+  sync:
+    interval: ${CATALOG_SYNC_INTERVAL:10m}
+
+management:
+  endpoint:
+    health:
+      show-details: when-authorized

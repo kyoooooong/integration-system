@@ -1,0 +1,93 @@
+# 어느 환경에서나 같은 것만 둔다.
+# 접속 정보와 비밀값은 여기 두지 않는다 — 이 파일은 저장소에 커밋된다.
+spring:
+  application:
+    name: stay-integration
+  datasource:
+    hikari:
+      # 기본값은 30초로 아래 async request-timeout 보다 3배 길다.
+      #
+      # 검색의 카탈로그 스냅샷 조회는 Mono 조립 "전" 서블릿 스레드에서 동기 실행되므로
+      # async request-timeout 이 적용되지 않는다. 기본값을 그대로 두면 풀이 고갈됐을 때
+      # 서블릿 스레드가 30초 동안 묶이고 그것을 끊는 장치가 없다.
+      # Reactor Netty 의 획득 대기(기본 45초)와 정확히 같은 종류의 함정이다.
+      #
+      # DESIGN_INVARIANT: connection-timeout < spring.mvc.async.request-timeout
+      #
+      # 단위 주의 — 이 값은 Duration 이 아니라 밀리초 long 으로 바인딩된다.
+      # "3s" 로 적었다가 기동이 깨졌다. 조용히 무시되지 않고 시끄럽게 실패한 것은 옳은 동작이다.
+      connection-timeout: 3000
+      # 기본값 10 을 유지한다. 카탈로그 조회 스케일 테스트가 숙소 2,000개와 객실 타입
+      # 6,000개를 읽는 경로를 검증한다. 절대 시간은 호스트와 DB 상태에 따라 달라지므로
+      # 설정 주석에서 성능 SLA 처럼 주장하지 않는다. DB 조회가 측정된 병목이 되기 전까지
+      # 풀을 먼저 늘릴 근거가 없다.
+      # PostgreSQL 은 커넥션마다 백엔드 프로세스를 포크하므로 넉넉히 잡는 것이 공짜가 아니다.
+      maximum-pool-size: 10
+  profiles:
+    # 프로파일을 주지 않고 실행하면 로컬 개발 구성으로 뜬다.
+    # 운영 구성이 기본이면 설정을 빠뜨렸을 때 조용히 잘못된 곳에 붙는다.
+    default: local
+  # 종료 시 처리 중인 요청을 끝까지 보낸다.
+  #
+  # 기본값(immediate)이면 배포 때마다 진행 중이던 검색이 연결 리셋으로 끊긴다.
+  # 검색은 GET 이라 클라이언트가 재시도해도 안전하지만, 끊긴 요청은 우리 지표에서
+  # 공급사 실패와 구분되지 않는다 — 배포할 때마다 실패율이 튀는데 원인이 우리 배포다.
+  #
+  # DESIGN_INVARIANT: timeout-per-shutdown-phase > spring.mvc.async.request-timeout
+  # 그보다 짧으면 아직 응답을 만들 수 있는 요청을 우리가 끊는 것이라 graceful 이 아니다.
+  lifecycle:
+    timeout-per-shutdown-phase: 15s
+  mvc:
+    async:
+      # 이 값이 발화하면 Spring 기본 동작인 503 이 나간다. 504 로 바꾸지 않는다.
+      # 공급사 타임아웃(504)과 우리 fan-out 한계(503)는 다른 신호다.
+      # EVALUATION_DEFAULT. 운영에서는 async timeout 발생 빈도와 요청 지연을 본 뒤 조정한다.
+      request-timeout: 10s
+
+supplier:
+  # 공급사 SLO 도 rate limit 도 계약에 없으므로 개별 값의 운영 최적값은 주장하지 않는다.
+  # bulkhead 16 은 현재 부하 검증에서 실제 구속 조건으로 동작하는지 확인한다.
+  # 핵심 주장은 값들 사이의 순서 관계이고, 그 순서가 포화를 어느 계층에서 드러낼지를 정한다.
+  # 위반하면 기동이 실패한다.
+  #
+  #   batch-concurrency  <=  bulkhead-max-concurrent-calls  <  max-connections
+  #   pending-acquire-timeout  <  response-timeout
+  #
+  connect-timeout: 1s
+  response-timeout: 2s
+  # 한 검색 요청의 fan-out 상한 (request-local)
+  batch-concurrency: 4
+  # 공급사 하나에 대한 전체 동시 호출 상한. batch-concurrency 는 요청마다 적용되므로
+  # 동시 검색 N 건이면 상류로 N 배가 나간다. 그것을 여기서 막는다.
+  bulkhead-max-concurrent-calls: 16
+  # 공급사 하나당 전송 계층 커넥션 상한. 풀은 공급사별로 분리되어 있으므로
+  # 이 값은 bulkhead 와 1:1 로 비교된다. 전송 계층이 구속 조건이 되면 안 된다 —
+  # Reactor Netty 기본값은 max(availableProcessors, 8) x 2 라 호스트 CPU 에 따라
+  # 달라지고, 그러면 "동시 몇 건까지 견디는가" 가 배포 환경마다 달라진다.
+  max-connections: 24
+  # 기본값 45s 는 response-timeout 보다 훨씬 길다. 그대로 두면 풀 고갈이
+  # 공급사 타임아웃으로 기록된다.
+  pending-acquire-timeout: 500ms
+
+server:
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      # 프로파일마다 다르게 둔다. 상세 노출은 로컬에서만.
+      show-details: never
+
+springdoc:
+  swagger-ui:
+    # 엔드포인트가 하나뿐이라 접어 둘 이유가 없다. 문서를 여는 사람이
+    # 파라미터와 상태 코드를 보려고 한 번 더 클릭하게 만들지 않는다.
+    doc-expansion: full
+    # 스키마를 알파벳순으로 고정한다. 기본값은 선언 순서라 클래스를 옮기면
+    # 문서의 순서가 바뀌고, 그러면 문서 diff 에 의미 없는 변경이 생긴다.
+    operations-sorter: alpha
+    tags-sorter: alpha
