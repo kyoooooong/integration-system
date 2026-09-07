@@ -1,0 +1,21 @@
+# 로컬 실행용 PostgreSQL.
+# 스키마는 여기서 만들지 않는다. 애플리케이션과 Testcontainers 가 같은 Flyway 경로로
+# 초기화해야 하므로, 초기화 SQL 을 compose 에 두면 경로가 둘로 갈라진다.
+services:
+  postgres:
+    # patch 까지 pin 한다. Testcontainers 가 쓰는 이미지와 같은 태그다.
+    image: postgres:17.9-alpine
+    container_name: stay-postgres
+    environment:
+      POSTGRES_DB: stay
+      POSTGRES_USER: stay
+      POSTGRES_PASSWORD: stay
+    ports:
+      # 호스트 5432 는 로컬에 설치된 PostgreSQL 과 충돌한다. 리뷰어에게 자기 DB 를
+      # 끄라고 요구하지 않기 위해 호스트 쪽만 옮긴다. 컨테이너 안은 그대로 5432 다.
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stay -d stay"]
+      interval: 2s
+      timeout: 3s
+      retries: 15

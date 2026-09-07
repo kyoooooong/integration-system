@@ -1,0 +1,18 @@
+# Boot BOM 이 관리하지 않는 라이브러리만 여기서 명시 pin 한다.
+# BOM 이 관리하는 것(jackson, testcontainers, junit, reactor, flyway)은 버전을 적지 않는다.
+[versions]
+# stable 계열. 4.0.0 은 beta 라 쓰지 않는다.
+wiremock = "3.13.1"
+archunit = "1.4.1"
+resilience4j = "2.3.0"
+springdoc = "3.1.1"
+
+[libraries]
+wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
+archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+# bulkhead 와 reactor 어댑터만. 애노테이션 기반 spring-boot2 스타터를 쓰지 않는다 —
+# 애노테이션은 메서드 호출을 감싸므로 Mono 반환 메서드에서는 조립만 제한하거나
+# 이벤트 루프를 막는다. Reactor 연산자로 파이프라인 안에 넣어야 한다.
+resilience4j-bulkhead = { module = "io.github.resilience4j:resilience4j-bulkhead", version.ref = "resilience4j" }
+resilience4j-reactor = { module = "io.github.resilience4j:resilience4j-reactor", version.ref = "resilience4j" }
+springdoc-webmvc-ui = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc" }

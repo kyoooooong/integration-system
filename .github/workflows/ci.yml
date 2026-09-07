@@ -1,0 +1,101 @@
+# 저장소가 로컬 환경에만 의존하지 않고 재현 가능한지 확인한다.
+#
+# Testcontainers 가 실제 PostgreSQL 을 띄우므로 Docker 가 필요하다.
+# GitHub 의 ubuntu 러너에는 Docker 가 이미 있어서 별도 서비스 컨테이너를 선언하지 않는다 —
+# 선언하면 스키마 초기화 경로가 Flyway 와 compose 로 갈라진다.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: gradle
+
+      # 포맷 위생을 사람이 리뷰에서 지적하지 않게 한다.
+      - name: Spotless
+        run: ./gradlew spotlessCheck --no-daemon
+
+      # 공개 저장소에 들어가면 안 되는 표현과 환경 파일 추적을 CI 에서도 막는다.
+      - name: 공개 저장소 위생 검사
+        run: scripts/check-repo-hygiene.sh
+
+      # AI 지침이 Claude / Codex 두 도구에서 갈라지지 않았는지.
+      - name: AI 지침 동기화 확인
+        run: scripts/check-agent-guides.sh
+
+      # 단위 + 통합(Testcontainers, WireMock) + 아키텍처 테스트가 전부 여기 들어 있다.
+      - name: Build and test
+        run: ./gradlew clean check --no-daemon
+
+      # README 가 적어 둔 테스트 개수가 실제와 같은지 대조한다.
+      # 개수는 테스트를 실행해야 알 수 있으므로 pre-commit 이 아니라 여기서만 돈다.
+      - name: README 테스트 집계 대조
+        run: scripts/check-doc-test-counts.sh
+
+      # 실패했을 때 어느 테스트가 왜 깨졌는지 로그를 뒤지지 않아도 되게 한다.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: '**/build/reports/tests/test'
+          retention-days: 7
+
+  # 실행 절차가 실제로 동작하는지 확인한다.
+  # 빌드가 통과하는 것과 README 대로 띄웠을 때 뜨는 것은 다르다.
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start full stack
+        run: |
+          cp .env.sample .env
+          docker compose -f compose.full.yaml up -d --build
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 90); do
+            if curl -sf localhost:8080/actuator/health | grep -q UP; then
+              echo "up after ${i}s"; exit 0
+            fi
+            sleep 2
+          done
+          echo "did not become healthy"
+          docker compose -f compose.full.yaml logs app
+          exit 1
+
+      # 기준 예시 데이터의 값이 그대로 나오는지 본다.
+      # A 는 일별 net 합산으로 429,000, B 는 총액 그대로 452,000 이다.
+      # README 의 시연 절차를 문서 그대로 실행한다.
+      # 로컬에서 사람이 돌리는 스크립트와 CI 가 확인하는 것이 같아야,
+      # "제 로컬에서는 됩니다" 와 "CI 는 통과합니다" 가 갈라지지 않는다.
+      # prod 프로파일은 동기화 주기가 1시간이라 재동기화 대기 항목은 건너뛴다.
+      - name: Verify demo procedure
+        run: SYNC_WAIT=0 scripts/verify-demo.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f compose.full.yaml logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f compose.full.yaml down -v

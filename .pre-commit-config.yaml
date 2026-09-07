@@ -1,0 +1,29 @@
+# 커밋 전에 걸러 낸다. CI 에서 같은 것을 다시 확인하므로 훅을 건너뛰어도 안전망은 남는다.
+#
+# 테스트는 여기 넣지 않는다. Testcontainers 가 컨테이너를 띄우므로 커밋마다 수십 초가 들고,
+# 그러면 사람이 --no-verify 를 습관적으로 쓰게 된다. 훅은 빠를 때만 지켜진다.
+repos:
+  - repo: local
+    hooks:
+      - id: spotless-apply
+        name: Spotless (import 정리·공백·개행)
+        language: system
+        entry: ./gradlew spotlessApply --no-daemon --quiet
+        pass_filenames: false
+        types_or: [java, kotlin]
+
+      # 공개 저장소다. 회사명이나 스펙 원문을 가리키는 표현이 들어가면 커밋 전에 막는다.
+      - id: no-leaked-context
+        name: 공개 저장소 위생 검사
+        language: system
+        entry: scripts/check-repo-hygiene.sh
+        pass_filenames: false
+        always_run: true
+
+      # AI 지침이 도구별로 갈라지지 않았는지. 한쪽만 고치면 기준이 둘이 된다.
+      - id: agent-guides-in-sync
+        name: AI 지침 동기화 확인
+        language: system
+        entry: scripts/check-agent-guides.sh
+        pass_filenames: false
+        always_run: true
